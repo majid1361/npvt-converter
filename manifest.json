@@ -1,0 +1,23 @@
+{
+  "name": "NPVT Converter - Majid Ranjbar",
+  "short_name": "NPVT مبدل",
+  "description": "Offline NPV Tunnel & V2Ray Converter",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0c0406",
+  "theme_color": "#18090e",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
