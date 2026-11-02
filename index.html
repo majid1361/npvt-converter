@@ -1046,6 +1046,339 @@
             insecure: !!firstValue(tls.allowInsecure, reality.allowInsecure, stream.allowInsecure)
           };
         }
+        function buildXrayStreamSettings(p){
+          const network = normalizeNetworkId(firstValue(p.network, 'tcp'));
+          const security = firstValue(p.security, 'none') || 'none';
+          const stream = {network, security};
+          
+          if (security === 'tls') {
+            const tls = {allowInsecure: !!p.insecure};
+            if (p.sni) tls.serverName = p.sni;
+            const alpn = alpnList(p.alpn);
+            if (alpn.length) tls.alpn = alpn;
+            if (p.fingerPrint) tls.fingerprint = p.fingerPrint;
+            stream.tlsSettings = tls;
+          }
+          if (security === 'reality') {
+            const reality = {allowInsecure: p.insecure !== undefined ? !!p.insecure : false};
+            if (p.sni) reality.serverName = p.sni;
+            if (p.fingerPrint) reality.fingerprint = p.fingerPrint;
+            if (p.publicKey) reality.publicKey = p.publicKey;
+            if (p.shortId) reality.shortId = p.shortId;
+            if (p.spiderX) reality.spiderX = p.spiderX;
+            stream.realitySettings = reality;
+          }
+          if (network === 'ws') {
+            const ws = {path: p.path || '/'};
+            if (p.host) ws.headers = {Host: p.host};
+            stream.wsSettings = ws;
+          }
+          if (network === 'grpc') {
+            stream.grpcSettings = { serviceName: p.serviceName || '' };
+            if (p.authority) stream.grpcSettings.authority = p.authority;
+          }
+          if (network === 'tcp' || network === 'http') {
+            const headerType = firstValue(p.headerType, 'none');
+            stream.tcpSettings = {header: {type: headerType || 'none'}};
+          }
+          return stream;
+        }
+
+        function buildXrayOutbound(p){
+          const protocol = npvProtocolName(p);
+          const outbound = {
+            tag: 'proxy',
+            protocol: protocol,
+            settings: {},
+            streamSettings: buildXrayStreamSettings(p),
+            mux: { enabled: false, concurrency: -1 }
+          };
+          
+          const port = numberPort(p.serverPort);
+
+          if (protocol === 'vless') {
+            outbound.settings = { 
+              address: p.server, 
+              port: port, 
+              id: p.password, 
+              encryption: firstValue(p.method, 'none'),
+              level: 8
+            };
+            if (p.flow) outbound.settings.flow = p.flow;
+          } else if (protocol === 'vmess') {
+            outbound.settings = { address: p.server, port: port, id: p.password, security: firstValue(p.method, 'auto'), level: 8 };
+          } else if (protocol === 'trojan') {
+            outbound.settings = { address: p.server, port: port, password: p.password, level: 8 };
+          } else if (protocol === 'shadowsocks') {
+            outbound.settings = { address: p.server, port: port, method: firstValue(p.method, 'aes-128-gcm'), password: p.password, level: 8 };
+          } else if (protocol === 'socks') {
+            outbound.settings = { address: p.server, port: port, level: 8 };
+            if (p.username || p.password) outbound.settings.users = [{ user: p.username || '', pass: p.password || '' }];
+          }
+          
+          return outbound;
+        }
+
+        function buildRealStyleXrayJsonFromParsedProfile(p){
+          const outbound = buildXrayOutbound(p);
+          
+          if (p.extraParams && Object.keys(p.extraParams).length > 0) {
+            if (p.extraParams.sockopt) {
+                try { outbound.streamSettings.sockopt = JSON.parse(p.extraParams.sockopt); } catch(e) {}
+            }
+            if (p.extraParams.mux) {
+                try { outbound.mux = JSON.parse(p.extraParams.mux); } catch(e) {}
+            }
+          }
+
+          return { 
+            dns: {
+              hosts: {
+                "geosite:category-ads-all": "127.0.0.1",
+                "domain:googleapis.cn": "googleapis.com",
+                "dns.google": ["8.8.8.8", "8.8.4.4"],
+                "one.one.one.one": ["1.1.1.1", "1.0.0.1"],
+                "shecan.ir": ["178.22.122.100", "185.51.200.2"],
+                "radar.game": ["10.202.10.10", "10.202.10.11"]
+              },
+              servers: [
+                { address: "178.22.122.100", domains: ["geosite:category-ir", "geosite:private"], skipFallback: true },
+                "1.1.1.1", 
+                "8.8.8.8"
+              ]
+            },
+            inbounds: [{ 
+              tag: 'socks', 
+              port: 10808, 
+              protocol: 'socks', 
+              settings: {auth: 'noauth', udp: true, userLevel: 8}, 
+              sniffing: {enabled: true, destOverride: ['http','tls','quic'], routeOnly: false} 
+            }], 
+            outbounds: [ 
+              outbound, 
+              {tag:'direct', protocol:'freedom', settings:{domainStrategy:'UseIP'}}, 
+              {tag:'block', protocol:'blackhole', settings:{}} 
+            ], 
+            policy: { 
+              levels: { "8": { connIdle: 300, downlinkOnly: 1, handshake: 4, uplinkOnly: 1 } }, 
+              system: { statsOutboundUplink: true, statsOutboundDownlink: true } 
+            },
+            routing: {
+              domainStrategy: 'IPIfNonMatch',
+              rules: [
+                { domain: ["geosite:category-ads-all", "geosite:category-porn"], outboundTag: "block", type: "field" },
+                { network: "udp", outboundTag: "block", port: "443", type: "field" },
+                { ip: ["10.10.34.34", "10.10.34.35", "10.10.34.36", "geoip:private"], outboundTag: "direct", type: "field" },
+                { domain: ["domain:ir", "geosite:category-ir", "geosite:private"], outboundTag: "direct", type: "field" },
+                { ip: ["geoip:ir"], outboundTag: "direct", type: "field" },
+                { outboundTag: "proxy", port: "0-65535", type: "field" }
+              ]
+            },
+            remarks: cleanRemarkName(p.name, `${String(p.protocol || 'V2Ray').toUpperCase()} Config`)
+          };
+        }
+        
+        function shouldPersistAsFieldsOnly(p){
+          const proto = npvProtocolName(p);
+          const network = String(p.network || '').toLowerCase();
+          const security = String(p.security || '').toLowerCase();
+          if (security === 'reality') return false;
+          if (network === 'tcp') return false;
+          if (proto === 'vless') return true;
+          if (proto === 'trojan' && (network === 'ws' || network === 'grpc' || network === 'httpupgrade' || network === 'splithttp')) return true;
+          return false;
+        }
+        function compactJson(obj){ return JSON.stringify(obj); }
+        function npvV2RayProfileFromParsed(p, index=0){
+          const remarks = cleanRemarkName(p.name, `${String(p.protocol || 'V2Ray').toUpperCase()} ${index + 1}`);
+          const effectiveProto = npvProtocolName(p);
+          const v2 = { configVersion: 4, configType: configTypeForParsedProfile(p), subscriptionId: "", addedTime: Date.now() + index, remarks, server: p.server, serverPort: String(p.serverPort), password: p.password || "" };
+          if (effectiveProto === 'vless' || effectiveProto === 'vmess') addIfSet(v2, 'method', firstValue(p.method, effectiveProto === 'vmess' ? 'auto' : 'none'));
+          if (effectiveProto === 'shadowsocks') addIfSet(v2, 'method', firstValue(p.method, 'aes-128-gcm'));
+          const profileNetwork = firstValue(p.network, 'tcp');
+          const profileSecurity = firstValue(p.security);
+          addIfSet(v2, 'network', profileNetwork);
+          addIfDefined(v2, 'host', firstValue(p.host));
+          addIfDefined(v2, 'path', firstValue(p.path));
+          addIfSet(v2, 'security', profileSecurity);
+          addIfDefined(v2, 'sni', firstValue(p.sni));
+          addIfDefined(v2, 'fingerPrint', firstValue(p.fingerPrint));
+          addIfDefined(v2, 'insecure', !!p.insecure);
+          addIfSet(v2, 'alpn', firstValue(p.alpn));
+          if (effectiveProto === 'vless') addIfSet(v2, 'flow', p.flow);
+          if (profileNetwork === 'tcp' || (p.headerType && p.headerType !== 'none')) addIfSet(v2, 'headerType', p.headerType || 'none');
+          if (profileSecurity === 'reality') { addIfSet(v2, 'publicKey', p.publicKey); addIfSet(v2, 'shortId', p.shortId); addIfSet(v2, 'spiderX', p.spiderX); }
+          if (profileNetwork === 'grpc') { addIfSet(v2, 'serviceName', p.serviceName); addIfSet(v2, 'authority', p.authority); addIfSet(v2, 'mode', p.mode || 'gun'); addIfSet(v2, 'xhttpMode', p.xhttpMode || 'gun'); }
+          if (shouldPersistAsFieldsOnly(p)) { v2.v2rayJson = ""; v2.persistJson = true; } else { v2.v2rayJson = compactJson(buildRealStyleXrayJsonFromParsedProfile(p)); v2.persistJson = false; }
+          return v2;
+        }
+        function npvProfileObjectFromLink(link, index=0){
+          const p = linkToNpvParsedProfile(link);
+          if (!p.server || !p.serverPort) throw new Error('missing server/port');
+          if (!p.password && p.protocol !== 'socks') throw new Error('missing UUID/password');
+          const v2 = npvV2RayProfileFromParsed(p, index);
+          return { name: v2.remarks, address: `${v2.server}:${v2.serverPort}`, type: 'V2RAY', v2rayProfile: v2, lockConfig: defaultNpvLockConfig() };
+        }
+        function buildNpvProfileList(linkItems){ return linkItems.map((x, i) => npvProfileObjectFromLink(String((x && x.link) || x || '').trim(), i)); }
+        function decodeOneNPVTToken(text) {
+          let tok = String(text || '').trim();
+          tok = tok.replace(/^npvt:\/\//i, '');
+          tok = tok.replace(/^\s*NPVT1\s*[:=,-]?\s*/i, '');
+          tok = tok.replace(/^["'`]+|["'`]+$/g, '');
+          tok = stripWs(tok);
+          if (!tok) throw new Error('empty token');
+          tok = tok.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9+/=_-]+$/g, '');
+          if (isHex(tok) && tok.length >= 32) return hexToBytes(tok);
+          return b64ToBytes(tok);
+        }
+        function decodeNPVTPlainChunks(text){
+          let tok = String(text || '').trim();
+          tok = tok.replace(/^npvt:\/\//i, '').replace(/^\s*NPVT1\s*[:=\-]?\s*/i, '').trim();
+          const parts = tok.includes(',') ? tok.split(',').map(x => x.trim()).filter(Boolean) : [tok];
+          const out = [];
+          for (let i = 0; i < parts.length; i++) {
+            const encrypted = decodeOneNPVTToken(parts[i]);
+            const plainBytes = decryptNPVTBytes(encrypted);
+            const plain = bytesToText(plainBytes).replace(/\0+$/g, '').trim();
+            out.push({part:i + 1, text:plain});
+          }
+          return out;
+        }
+        function extractNPVTTokens(text, forceNPVT=false) {
+          const raw = String(text || '');
+          const tokens = [];
+          const seen = new Set();
+          const re = /NPVT1\s*[:=\-]?\s*([A-Za-z0-9+/_=-]{8,}(?:\s*,\s*[A-Za-z0-9+/_=-]{8,})*)/gi;
+          let m;
+          while ((m = re.exec(raw))) {
+            const body = m[1].split(',').map(x => stripWs(x)).filter(Boolean).join(',');
+            const tok = 'NPVT1 ' + body;
+            if (!seen.has(tok)) { seen.add(tok); tokens.push(tok); }
+          }
+          if (forceNPVT && !tokens.length) {
+            const compact = raw.trim().replace(/^npvt:\/\//i, '').replace(/^NPVT1\s*[:=\-]?/i, '').trim();
+            if (compact.length >= 8 && /^[A-Za-z0-9+/_=\-,\s]+$/.test(compact)) {
+              const tok = 'NPVT1 ' + compact.split(',').map(x => stripWs(x)).filter(Boolean).join(',');
+              if (!seen.has(tok)) tokens.push(tok);
+            }
+          }
+          return tokens;
+        }
+        function cleanExtractedUri(uri) { return String(uri || '').replace(/[),.;\]\}]+$/g, ''); }
+        function extractRawLinks(text) {
+          const links = [];
+          const re = /(^|[^A-Za-z0-9+.-])((?:vless|vmess|trojan|ss|ssr|socks|hysteria2\+realm\+http|hysteria2\+realm|hysteria2?|hy2|tuic|wireguard):\/\/[^\s"'<>]+)/gi;
+          let m;
+          while ((m = re.exec(String(text || '')))) {
+            const link = cleanExtractedUri(m[2]);
+            if (link && !links.includes(link)) links.push(link);
+          }
+          return links;
+        }
+        function tryDecodeBase64Text(text) {
+          const compact = stripWs(text);
+          if (compact.length < 12 || compact.length > 2_000_000) return null;
+          if (!/^[A-Za-z0-9+/_=-]+$/.test(compact)) return null;
+          try {
+            const decoded = bytesToText(b64ToBytes(compact));
+            if (extractRawLinks(decoded).length || decoded.trim().startsWith('{') || decoded.trim().startsWith('[')) return decoded;
+          } catch (_) {}
+          return null;
+        }
+        function parseJSONCandidates(text) {
+          const out = [];
+          const tried = new Set();
+          function pushParse(s) {
+            s = String(s || '').trim();
+            if (!s || tried.has(s)) return;
+            tried.add(s);
+            try { out.push(JSON.parse(s)); } catch (_) {}
+          }
+          const raw = String(text || '').replace(/^\uFEFF/, '');
+          pushParse(raw);
+          const firstBrace = raw.search(/[\[{]/);
+          if (firstBrace > 0) pushParse(raw.slice(firstBrace));
+
+          let start = -1, depth = 0, inStr = false, esc = false;
+          for (let i = 0; i < raw.length; i++) {
+            const ch = raw[i];
+            if (inStr) {
+              if (esc) esc = false;
+              else if (ch === '\\') esc = true;
+              else if (ch === '"') inStr = false;
+              continue;
+            }
+            if (ch === '"') { inStr = true; continue; }
+            if (ch === '{' || ch === '[') {
+              if (depth === 0) start = i;
+              depth++;
+            } else if ((ch === '}' || ch === ']') && depth > 0) {
+              depth--;
+              if (depth === 0 && start >= 0) { pushParse(raw.slice(start, i + 1)); start = -1; }
+            }
+          }
+          return out;
+        }
+        function firstValue(...values) {
+          for (const value of values) {
+            if (value === undefined || value === null) continue;
+            if (Array.isArray(value)) {
+              const filtered = value.filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+              if (filtered.length) return filtered.join(',');
+              continue;
+            }
+            if (typeof value === 'object') continue;
+            if (String(value).trim() !== '') return value;
+          }
+          return '';
+        }
+        function getHeaderValue(headers, ...keys) {
+          if (!headers || typeof headers !== 'object') return '';
+          for (const key of keys) {
+            if (headers[key] !== undefined) return firstValue(headers[key]);
+            const found = Object.keys(headers).find(k => k.toLowerCase() === String(key).toLowerCase());
+            if (found) return firstValue(headers[found]);
+          }
+          return '';
+        }
+        function normalizeNetworkId(v){
+          const n = String(v || '').trim().toLowerCase();
+          if (!n) return '';
+          if (n === 'websocket') return 'ws';
+          if (n === 'raw') return 'tcp';
+          if (n === 'http' || n === 'h2') return 'http';
+          if (n === 'httpupgrade' || n === 'httpupgrade') return 'httpupgrade';
+          if (n === 'splithttp' || n === 'split-http' || n === 'xhttp') return n === 'xhttp' ? 'xhttp' : 'splithttp';
+          return n;
+        }
+        function streamSettingsToProfile(stream={}) {
+          stream = stream || {};
+          const tls = stream.tlsSettings || {};
+          const reality = stream.realitySettings || {};
+          const ws = stream.wsSettings || {};
+          const grpc = stream.grpcSettings || {};
+          const http = stream.httpSettings || {};
+          const httpUpgrade = stream.httpupgradeSettings || stream.httpUpgradeSettings || {};
+          const splithttp = stream.splithttpSettings || stream.splitHttpSettings || {};
+          const tcp = stream.tcpSettings || {};
+          const tcpHeader = tcp.header || {};
+          const tcpRequest = tcpHeader.request || {};
+          const security = firstValue(stream.security, reality && Object.keys(reality).length ? 'reality' : '', tls && Object.keys(tls).length ? 'tls' : '', 'none');
+          const network = normalizeNetworkId(firstValue(stream.network, stream.net, ws.path !== undefined ? 'ws' : '', grpc.serviceName !== undefined ? 'grpc' : '', 'tcp'));
+          return {
+            network, security, headerType: firstValue(tcpHeader.type, http.host ? 'http' : '', 'none'),
+            sni: firstValue(tls.serverName, reality.serverName, stream.serverName, stream.sni),
+            fp: firstValue(tls.fingerprint, tls.fp, reality.fingerprint, reality.fp),
+            publicKey: firstValue(reality.publicKey, reality.pbk, stream.publicKey, stream.pbk),
+            shortId: firstValue(reality.shortId, reality.shortIds, reality.sid, stream.shortId, stream.sid),
+            spiderX: firstValue(reality.spiderX, reality.spx, stream.spiderX, stream.spx),
+            alpn: firstValue(tls.alpn, reality.alpn, stream.alpn),
+            hostHeader: firstValue(ws.host, getHeaderValue(ws.headers, 'Host', 'host'), getHeaderValue(httpUpgrade.headers, 'Host', 'host'), getHeaderValue(splithttp.headers, 'Host', 'host'), getHeaderValue(tcpRequest.headers, 'Host', 'host'), http.host),
+            path: firstValue(ws.path, http.path, httpUpgrade.path, splithttp.path, tcpRequest.path),
+            serviceName: firstValue(grpc.serviceName), authority: firstValue(grpc.authority),
+            insecure: !!firstValue(tls.allowInsecure, reality.allowInsecure, stream.allowInsecure)
+          };
+        }
         function outboundToProfiles(outbound, inheritedName='') {
           const profiles = [];
           if (!outbound || typeof outbound !== 'object') return profiles;
@@ -1056,19 +1389,43 @@
           const outboundTag = String(outbound.tag || '').trim();
           const genericOutboundTag = /^(proxy|direct|block|dns|dns-out|blackhole|freedom)$/i.test(outboundTag);
           const baseName = firstValue(outbound.name, outbound.remarks, genericOutboundTag ? '' : outboundTag, inheritedName, protocol.toUpperCase());
+          
           if ((protocol === 'vless' || protocol === 'vmess') && Array.isArray(settings.vnext)) {
             for (const server of settings.vnext) {
               const users = Array.isArray(server.users) && server.users.length ? server.users : [{}];
               for (const user of users) {
-                profiles.push({ ...common, protocol, name: firstValue(user.email, user.name, baseName), server: firstValue(server.address, server.add, server.host), serverPort: firstValue(server.port, server.serverPort), id: firstValue(user.id, user.uuid, user.password), method: firstValue(user.encryption, user.security, user.scy, protocol === 'vless' ? 'none' : 'auto'), alterId: firstValue(user.alterId, user.aid, '0'), flow: firstValue(user.flow, common.flow) });
+                profiles.push({ ...common, protocol, name: firstValue(user.email, user.name, baseName), server: firstValue(server.address, server.add, server.host), serverPort: firstValue(server.port, server.serverPort), id: firstValue(user.id, user.uuid, user.password), method: firstValue(user.encryption, user.security, user.scy, protocol === 'vless' ? 'none' : 'auto'), alterId: firstValue(user.alterId, user.aid, '0'), flow: firstValue(user.flow, common.flow), extraParams: common.extraParams || {} });
               }
             }
           }
+          
           if ((protocol === 'trojan' || protocol === 'shadowsocks' || protocol === 'ss' || protocol === 'socks') && Array.isArray(settings.servers)) {
             for (const server of settings.servers) {
-              profiles.push({ ...common, protocol: protocol === 'shadowsocks' ? 'ss' : protocol, name: firstValue(server.email, server.name, server.remarks, baseName), server: firstValue(server.address, server.server, server.host), serverPort: firstValue(server.port, server.serverPort), id: firstValue(server.password, server.pass, server.id, server.uuid), method: firstValue(server.method, server.cipher, server.security, protocol === 'shadowsocks' || protocol === 'ss' ? 'aes-128-gcm' : 'none'), username: firstValue(server.users && server.users[0] && server.users[0].user, server.username, server.user), password: firstValue(server.users && server.users[0] && server.users[0].pass, server.password, server.pass) });
+              profiles.push({ ...common, protocol: protocol === 'shadowsocks' ? 'ss' : protocol, name: firstValue(server.email, server.name, server.remarks, baseName), server: firstValue(server.address, server.server, server.host), serverPort: firstValue(server.port, server.serverPort), id: firstValue(server.password, server.pass, server.id, server.uuid), method: firstValue(server.method, server.cipher, server.security, protocol === 'shadowsocks' || protocol === 'ss' ? 'aes-128-gcm' : 'none'), username: firstValue(server.users && server.users[0] && server.users[0].user, server.username, server.user), password: firstValue(server.users && server.users[0] && server.users[0].pass, server.password, server.pass), extraParams: common.extraParams || {} });
             }
           }
+          
+          // پشتیبانی از فرمت تخت (Flattened) که V2RayN تولید می‌کند
+          if ((protocol === 'vless' || protocol === 'vmess' || protocol === 'trojan' || protocol === 'shadowsocks' || protocol === 'ss' || protocol === 'socks') && settings.address) {
+            const p = {
+              ...common,
+              protocol: protocol === 'shadowsocks' ? 'ss' : protocol,
+              name: firstValue(settings.email, settings.name, baseName),
+              server: firstValue(settings.address, settings.server, settings.host),
+              serverPort: firstValue(settings.port, settings.serverPort),
+              id: firstValue(settings.id, settings.uuid, settings.password),
+              method: firstValue(settings.encryption, settings.security, settings.method, protocol === 'vless' ? 'none' : 'auto'),
+              alterId: firstValue(settings.alterId, settings.aid, '0'),
+              flow: firstValue(settings.flow, common.flow),
+              extraParams: common.extraParams || {}
+            };
+            if (protocol === 'socks' && Array.isArray(settings.users) && settings.users.length > 0) {
+                p.username = settings.users[0].user;
+                p.password = settings.users[0].pass;
+            }
+            profiles.push(p);
+          }
+          
           if (protocol === 'hysteria2' || protocol === 'hy2' || protocol === 'hysteria') {
             const tls = outbound.tls || outbound.tlsSettings || {};
             const obfs = outbound.obfs || {};
