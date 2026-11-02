@@ -1,24 +1,63 @@
 {
+  "id": "./",
   "name": "NPV Tunnel NPVT Converter",
   "short_name": "NPVT Converter",
   "description": "Offline NPVT and V2Ray converter",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
   "background_color": "#060d09",
   "theme_color": "#060d09",
+  "categories": ["utilities", "productivity", "tools"],
+  "prefer_related_applications": false,
   "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
     {
       "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "NPVT → V2Ray",
+      "short_name": "NPVT to V2Ray",
+      "url": "./index.html?mode=npvt2v2ray",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "V2Ray → NPVT",
+      "short_name": "V2Ray to NPVT",
+      "url": "./index.html?mode=v2ray2npvt",
+      "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
     }
   ]
 }
