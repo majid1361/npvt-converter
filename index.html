@@ -471,11 +471,19 @@
           const raw = safeDecodeURIComponent(String(name || '').trim());
           return raw.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120) || fallback;
         }
-        function parseVmessShare(link){
+                function parseVmessShare(link){
           const payload = String(link || '').replace(/^vmess:\/\//i, '').trim();
           const obj = JSON.parse(bytesToText(b64ToBytes(payload)));
           const rawStreamSecurity = firstValue(obj.tls, obj.streamSecurity, obj.netSecurity);
           const streamSecurity = ['tls','reality','none'].includes(String(rawStreamSecurity).toLowerCase()) ? String(rawStreamSecurity).toLowerCase() : (rawStreamSecurity ? String(rawStreamSecurity).toLowerCase() : 'none');
+          
+          const extraParams = {};
+          for (const k in obj) {
+            if (!['v','ps','add','port','id','aid','scy','net','type','host','path','tls','sni','fp','alpn'].includes(k)) {
+              extraParams[k] = obj[k];
+            }
+          }
+
           return {
             protocol: 'vmess',
             name: cleanRemarkName(obj.ps, 'VMess'),
@@ -492,7 +500,8 @@
             sni: firstValue(obj.sni, obj.peer),
             alpn: firstValue(obj.alpn),
             fingerPrint: firstValue(obj.fp, obj.fingerprint),
-            insecure: truthyParam(obj.allowInsecure || obj.insecure)
+            insecure: truthyParam(obj.allowInsecure || obj.insecure),
+            extraParams: extraParams
           };
         }
         function parseStandardShare(link){
@@ -507,6 +516,15 @@
           const parsedNetwork = firstValue(q.type, q.net, q.network, 'tcp');
           const hasInsecure = url.searchParams.has('allowInsecure') || url.searchParams.has('insecure');
           const insecureDefault = String(parsedSecurity).toLowerCase() === 'reality' || (String(parsedNetwork).toLowerCase() === 'grpc' && !parsedSecurity);
+          
+          const extraParams = {};
+          const knownKeys = ['security', 'tls', 'type', 'net', 'network', 'port', 'encryption', 'securityCipher', 'method', 'headerType', 'header', 'host', 'requestHost', 'path', 'serviceName', 'grpcServiceName', 'sni', 'peer', 'serverName', 'alpn', 'flow', 'fp', 'fingerprint', 'pbk', 'publicKey', 'sid', 'shortId', 'shortIds', 'spx', 'spiderX', 'allowInsecure', 'insecure', 'packetEncoding'];
+          for (const [key, val] of url.searchParams.entries()) {
+            if (!knownKeys.includes(key)) {
+              extraParams[key] = val;
+            }
+          }
+
           const common = {
             protocol: proto,
             name,
@@ -527,7 +545,8 @@
             publicKey: firstValue(q.pbk, q.publicKey),
             shortId: firstValue(q.sid, q.shortId, q.shortIds),
             spiderX: firstValue(q.spx, q.spiderX),
-            insecure: hasInsecure ? truthyParam(firstValue(q.allowInsecure, q.insecure)) : insecureDefault
+            insecure: hasInsecure ? truthyParam(firstValue(q.allowInsecure, q.insecure)) : insecureDefault,
+            extraParams: extraParams
           };
           if (proto === 'trojan') common.method = 'none';
           if (proto === 'socks') {
@@ -543,8 +562,16 @@
           let hash = '';
           const hashIdx = body.indexOf('#');
           if (hashIdx >= 0) { hash = body.slice(hashIdx + 1); body = body.slice(0, hashIdx); }
+          
+          let extraParams = {};
           const qIdx = body.indexOf('?');
-          if (qIdx >= 0) body = body.slice(0, qIdx);
+          if (qIdx >= 0) { 
+            const query = body.slice(qIdx + 1); 
+            body = body.slice(0, qIdx); 
+            const parsedQ = new URLSearchParams(query);
+            for (const [k,v] of parsedQ.entries()) extraParams[k] = v;
+          }
+
           let userInfo = '', hostPort = '';
           const at = body.lastIndexOf('@');
           if (at >= 0) {
@@ -565,7 +592,7 @@
           const method = safeDecodeURIComponent(userInfo.slice(0, sep));
           const password = safeDecodeURIComponent(userInfo.slice(sep + 1));
           const hp = splitHostPortLoose(hostPort);
-          return { protocol: 'ss', name: cleanRemarkName(hash, 'Shadowsocks'), server: hp.host, serverPort: String(hp.port || '443'), password, method: method || 'aes-128-gcm', network: 'tcp', security: 'none', host: '', path: '', sni: '', alpn: '', fingerPrint: '', insecure: false };
+          return { protocol: 'ss', name: cleanRemarkName(hash, 'Shadowsocks'), server: hp.host, serverPort: String(hp.port || '443'), password, method: method || 'aes-128-gcm', network: 'tcp', security: 'none', host: '', path: '', sni: '', alpn: '', fingerPrint: '', insecure: false, extraParams };
         }
         function parseLooseShareUri(link){
           const str = String(link || '').trim();
@@ -618,6 +645,14 @@
           const isRealm = String(u.scheme || '').toLowerCase().startsWith('hysteria2+realm');
           const auth = isRealm ? qFirst(u.query, ['auth', 'password']) : safeDecodeURIComponent(u.userinfo || '');
           const outbound = { type: isRealm ? 'hysteria2+realm' : 'hysteria2', tag: 'proxy', server: u.host, password: auth, tls: {enabled: true} };
+          
+          const extraParams = {};
+          for (const [k,v] of u.query.entries()) {
+             if (!['auth','password','obfs','obfs-password','sni','peer','serverName','server_name','insecure','allowInsecure','alpn','network','upmbps','up_mbps','up','downmbps','down_mbps','down'].includes(k)) {
+                 extraParams[k] = v;
+             }
+          }
+
           const portSpec = String(u.portSpec || '').trim();
           if (portSpec) {
             if (/[,-]/.test(portSpec)) outbound.server_ports = portSpec.split(',').map(x => x.trim()).filter(Boolean);
@@ -638,7 +673,7 @@
           const down = qFirst(u.query, ['downmbps','down_mbps','down']);
           if (up) outbound.up_mbps = parseInt(up, 10) || up;
           if (down) outbound.down_mbps = parseInt(down, 10) || down;
-          return {name, protocol:'hysteria2', outbound};
+          return {name, protocol:'hysteria2', outbound, extraParams};
         }
         function parseTuicShare(link){
           const u = parseLooseShareUri(link);
@@ -648,6 +683,14 @@
           const password = sep >= 0 ? auth.slice(sep + 1) : '';
           const name = cleanRemarkName(u.hash, 'TUIC');
           const outbound = { type: 'tuic', tag: 'proxy', server: u.host, server_port: numberPort(u.portSpec || 443), uuid, password, tls: {enabled: true} };
+          
+          const extraParams = {};
+          for (const [k,v] of u.query.entries()) {
+             if (!['congestion_control','congestionControl','congestion','cc','udp_relay_mode','udpRelayMode','udp_relay','udp','udp_over_stream','udpOverStream','uot','zero_rtt_handshake','zeroRttHandshake','0rtt','heartbeat','network','sni','serverName','server_name','alpn','allowInsecure','insecure','allow_insecure'].includes(k)) {
+                 extraParams[k] = v;
+             }
+          }
+
           const cc = qFirst(u.query, ['congestion_control','congestionControl','congestion','cc']);
           if (cc) outbound.congestion_control = cc;
           const relay = qFirst(u.query, ['udp_relay_mode','udpRelayMode','udp_relay','udp']);
@@ -663,7 +706,7 @@
           const alpn = qFirst(u.query, ['alpn']);
           if (alpn) outbound.tls.alpn = alpnList(alpn);
           if (u.query.has('allowInsecure') || u.query.has('insecure') || u.query.has('allow_insecure')) outbound.tls.insecure = boolFromParams(u.query, ['allowInsecure','allow_insecure','insecure']);
-          return {name, protocol:'tuic', outbound};
+          return {name, protocol:'tuic', outbound, extraParams};
         }
         function buildSingBoxConfigFromOutbound(outbound, name='Proxy Config'){
           const clean = JSON.parse(JSON.stringify(outbound || {}));
@@ -774,7 +817,33 @@
           return outbound;
         }
         function buildRealStyleXrayJsonFromParsedProfile(p){
-          return { remarks: cleanRemarkName(p.name, `${String(p.protocol || 'V2Ray').toUpperCase()} Config`), log: {loglevel: 'warning'}, inbounds: [{ tag: 'socks', port: 10808, protocol: 'socks', settings: {auth: 'noauth', udp: true, userLevel: 8}, sniffing: {enabled: true, destOverride: ['http','tls'], routeOnly: false} }], outbounds: [ buildXrayOutbound(p), {tag:'direct', protocol:'freedom', settings:{domainStrategy:'UseIP'}, mux: realStyleMux(false)}, {tag:'block', protocol:'blackhole', settings:{response:{type:'http'}}, mux: realStyleMux(false)} ], dns: {servers: ['1.1.1.1']}, routing: {domainStrategy: 'IPIfNonMatch', rules: []} };
+          const outbound = buildXrayOutbound(p);
+          
+          if (p.extraParams && Object.keys(p.extraParams).length > 0) {
+            outbound.streamSettings = outbound.streamSettings || {};
+            outbound.streamSettings.extraParams = p.extraParams;
+            
+            if (p.extraParams.packetEncoding) outbound.streamSettings.packetEncoding = p.extraParams.packetEncoding;
+            if (p.extraParams.mux) {
+                try { outbound.mux = JSON.parse(p.extraParams.mux); } catch(e) {}
+            }
+            if (p.extraParams.sockopt) {
+                try { outbound.streamSettings.sockopt = JSON.parse(p.extraParams.sockopt); } catch(e) {}
+            }
+          }
+
+          return { 
+            remarks: cleanRemarkName(p.name, `${String(p.protocol || 'V2Ray').toUpperCase()} Config`), 
+            log: {loglevel: 'warning'}, 
+            inbounds: [{ tag: 'socks', port: 10808, protocol: 'socks', settings: {auth: 'noauth', udp: true, userLevel: 8}, sniffing: {enabled: true, destOverride: ['http','tls'], routeOnly: false} }], 
+            outbounds: [ 
+              outbound, 
+              {tag:'direct', protocol:'freedom', settings:{domainStrategy:'UseIP'}, mux: realStyleMux(false)}, 
+              {tag:'block', protocol:'blackhole', settings:{response:{type:'http'}}, mux: realStyleMux(false)} 
+            ], 
+            dns: {servers: ['1.1.1.1']}, 
+            routing: {domainStrategy: 'IPIfNonMatch', rules: []} 
+          };
         }
         function shouldPersistAsFieldsOnly(p){
           const proto = npvProtocolName(p);
@@ -1003,7 +1072,7 @@
           if (protocol === 'hysteria2' || protocol === 'hy2' || protocol === 'hysteria') {
             const tls = outbound.tls || outbound.tlsSettings || {};
             const obfs = outbound.obfs || {};
-            profiles.push({ protocol: 'hysteria2', scheme: protocol === 'hy2' ? 'hy2' : 'hysteria2', name: baseName, server: firstValue(outbound.server, outbound.address, outbound.host), serverPort: firstValue(outbound.server_port, outbound.serverPort, outbound.port), server_ports: firstValue(outbound.server_ports, outbound.serverPorts, outbound.ports), password: firstValue(outbound.password, outbound.auth, outbound.token), obfs: firstValue(obfs.type, outbound.obfs_type, outbound.obfsType), obfsPassword: firstValue(obfs.password, outbound.obfs_password, outbound.obfsPassword), sni: firstValue(tls.server_name, tls.serverName, outbound.sni, outbound.peer), insecure: firstValue(tls.insecure, outbound.insecure, outbound.allowInsecure), pinSHA256: firstValue(tls.pinSHA256, tls.pin_sha256, outbound.pinSHA256, outbound.pin_sha256), alpn: firstValue(tls.alpn, outbound.alpn) });
+            profiles.push({ protocol: 'hysteria2', scheme: protocol === 'hy2' ? 'hy2' : 'hysteria2', name: baseName, server: firstValue(outbound.server, outbound.address, outbound.host), serverPort: firstValue(outbound.server_port, outbound.serverPort, outbound.port), server_ports: firstValue(outbound.server_ports, outbound.serverPorts, outbound.ports), password: firstValue(outbound.password, outbound.auth, outbound.token), obfs: firstValue(obfs.type, outbound.obfs_type, outbound.obfsType), obfsPassword: firstValue(obfs.password, outbound.obfs_password, outbound.obfsPassword), sni: firstValue(tls.server_name, tls.serverName, outbound.sni, outbound.peer), insecure: firstValue(tls.insecure, outbound.insecure, outbound.allowInsecure), pinSHA256: firstValue(tls.pinSHA256, tls.pin_sha256, outbound.pinSHA256, outbound.pin_sha256), alpn: firstValue(tls.alpn, outbound.alpn), extraParams: outbound.streamSettings && outbound.streamSettings.extraParams ? outbound.streamSettings.extraParams : {} });
           }
           return profiles;
         }
@@ -1079,7 +1148,7 @@
           const remoteHost = firstValue(p.server, p.add, p.addressHost, fromAddr.host, p.host);
           const npvWsHost = (firstValue(p.server, p.add, fromAddr.host) && p.host && p.host !== remoteHost) ? p.host : '';
           return {
-            name: firstValue(p.remarks, p.ps, p.name, p.tag, fallbackName, 'NPVT config'), host: remoteHost, port: firstValue(p.serverPort, p.port, fromAddr.port), id: firstValue(p.password, p.id, p.uuid, p.userId, p.pass), username: firstValue(p.username, p.user), password: firstValue(p.password, p.pass), method: firstValue(p.method, p.securityCipher, p.cipher, p.scy, p.encryption, 'none'), alterId: firstValue(p.alterId, p.aid, '0'), network, headerType: firstValue(p.headerType, p.type, streamLike.headerType, 'none'), security, sni: firstValue(p.sni, p.serverName, p.peer, streamLike.sni), hostHeader: firstValue(p.hostHeader, p.requestHost, p.wsHost, p.hostName, p.headersHost, streamLike.hostHeader, npvWsHost), path: firstValue(p.path, p.requestPath, p.wsPath, streamLike.path), serviceName: firstValue(p.serviceName, p.grpcServiceName, streamLike.serviceName), authority: firstValue(p.authority, p.grpcAuthority, streamLike.authority), flow: firstValue(p.flow, streamLike.flow), fp: firstValue(p.fingerPrint, p.fingerprint, p.fp, streamLike.fp), publicKey: firstValue(p.publicKey, p.pbk, streamLike.publicKey), shortId: firstValue(p.shortId, p.shortIds, p.sid, streamLike.shortId), spiderX: firstValue(p.spiderX, p.spx, streamLike.spiderX), alpn: firstValue(p.alpn, streamLike.alpn), insecure: !!firstValue(p.insecure, p.allowInsecure, streamLike.insecure), configType: p.configType, protocol: firstValue(p.protocol, p.configProtocol, p.outboundProtocol)
+            name: firstValue(p.remarks, p.ps, p.name, p.tag, fallbackName, 'NPVT config'), host: remoteHost, port: firstValue(p.serverPort, p.port, fromAddr.port), id: firstValue(p.password, p.id, p.uuid, p.userId, p.pass), username: firstValue(p.username, p.user), password: firstValue(p.password, p.pass), method: firstValue(p.method, p.securityCipher, p.cipher, p.scy, p.encryption, 'none'), alterId: firstValue(p.alterId, p.aid, '0'), network, headerType: firstValue(p.headerType, p.type, streamLike.headerType, 'none'), security, sni: firstValue(p.sni, p.serverName, p.peer, streamLike.sni), hostHeader: firstValue(p.hostHeader, p.requestHost, p.wsHost, p.hostName, p.headersHost, streamLike.hostHeader, npvWsHost), path: firstValue(p.path, p.requestPath, p.wsPath, streamLike.path), serviceName: firstValue(p.serviceName, p.grpcServiceName, streamLike.serviceName), authority: firstValue(p.authority, p.grpcAuthority, streamLike.authority), flow: firstValue(p.flow, streamLike.flow), fp: firstValue(p.fingerPrint, p.fingerprint, p.fp, streamLike.fp), publicKey: firstValue(p.publicKey, p.pbk, streamLike.publicKey), shortId: firstValue(p.shortId, p.shortIds, p.sid, streamLike.shortId), spiderX: firstValue(p.spiderX, p.spx, streamLike.spiderX), alpn: firstValue(p.alpn, streamLike.alpn), insecure: !!firstValue(p.insecure, p.allowInsecure, streamLike.insecure), configType: p.configType, protocol: firstValue(p.protocol, p.configProtocol, p.outboundProtocol), extraParams: p.extraParams || (p.streamSettings ? p.streamSettings.extraParams : undefined)
           };
         }
         function detectProtocol(p) {
@@ -1109,6 +1178,7 @@
         function safeNested(obj, path){ try{ return path.split('.').reduce((acc, key) => acc && acc[key], obj); }catch(_){ return undefined; } }
         function formatUriHost(host){ const h = String(host || '').trim().replace(/^\[|\]$/g, ''); return h.includes(':') && !h.startsWith('[') ? `[${h}]` : h; }
         function hysteriaPortSpec(value){ if (Array.isArray(value)) return value.map(x => String(x).trim()).filter(Boolean).join(','); return String(value || '').trim(); }
+        
         function hysteria2ProfileToLink(p, fallbackName=''){
           p = p || {};
           const fromAddr = splitHostPort(p.address || p.serverAddress || '');
@@ -1119,43 +1189,100 @@
           const name = cleanRemarkName(firstValue(p.remarks, p.ps, p.name, p.tag, fallbackName, 'Hysteria2'), 'Hysteria2');
           const tls = p.tls && typeof p.tls === 'object' ? p.tls : {};
           const obfsObj = p.obfs && typeof p.obfs === 'object' ? p.obfs : {};
-          const q = [];
-          addParam(q, 'obfs', firstValue(obfsObj.type, p.obfs, p.obfs_type, p.obfsType)); addParam(q, 'obfs-password', firstValue(obfsObj.password, p.obfsPassword, p.obfs_password)); addParam(q, 'sni', firstValue(tls.server_name, tls.serverName, p.sni, p.serverName, p.peer));
-          if (firstValue(tls.insecure, p.insecure, p.allowInsecure) !== '') addParam(q, 'insecure', truthyParam(firstValue(tls.insecure, p.insecure, p.allowInsecure)) ? '1' : '0');
-          addParam(q, 'pinSHA256', firstValue(tls.pinSHA256, tls.pin_sha256, p.pinSHA256, p.pin_sha256));
-          const alpn = firstValue(tls.alpn, p.alpn); if (alpn) addParam(q, 'alpn', Array.isArray(alpn) ? alpn.join(',') : alpn);
+          
+          const q = new URLSearchParams(p.extraParams || {});
+          
+          if (firstValue(obfsObj.type, p.obfs, p.obfs_type, p.obfsType)) q.set('obfs', firstValue(obfsObj.type, p.obfs, p.obfs_type, p.obfsType)); 
+          if (firstValue(obfsObj.password, p.obfsPassword, p.obfs_password)) q.set('obfs-password', firstValue(obfsObj.password, p.obfsPassword, p.obfs_password)); 
+          if (firstValue(tls.server_name, tls.serverName, p.sni, p.serverName, p.peer)) q.set('sni', firstValue(tls.server_name, tls.serverName, p.sni, p.serverName, p.peer));
+          if (firstValue(tls.insecure, p.insecure, p.allowInsecure) !== '') q.set('insecure', truthyParam(firstValue(tls.insecure, p.insecure, p.allowInsecure)) ? '1' : '0');
+          if (firstValue(tls.pinSHA256, tls.pin_sha256, p.pinSHA256, p.pin_sha256)) q.set('pinSHA256', firstValue(tls.pinSHA256, tls.pin_sha256, p.pinSHA256, p.pin_sha256));
+          
+          const alpn = firstValue(tls.alpn, p.alpn); if (alpn) q.set('alpn', Array.isArray(alpn) ? alpn.join(',') : alpn);
+          if (p.up_mbps) q.set('upmbps', p.up_mbps);
+          if (p.down_mbps) q.set('downmbps', p.down_mbps);
+
           const scheme = String(firstValue(p.scheme, p.protocol, p.type)).toLowerCase().includes('hy2') ? 'hy2' : 'hysteria2';
-          const authPart = auth ? `${enc(auth)}@` : ''; const portPart = portSpec ? `:${portSpec}` : ''; const queryPart = q.length ? `?${q.join('&')}` : '';
-          return `${scheme}://${authPart}${formatUriHost(host)}${portPart}/${queryPart}#${enc(name)}`;
+          const authPart = auth ? `${enc(auth)}@` : ''; const portPart = portSpec ? `:${portSpec}` : ''; const qs = q.toString();
+          return `${scheme}://${authPart}${formatUriHost(host)}${portPart}/${qs ? '?' + qs : ''}#${enc(name)}`;
         }
+        
         function profileToLink(p, fallbackName='') {
           const n = normalizedProfile(p, fallbackName);
           if (!n.host || !n.port) throw new Error('missing host/port');
           const protocol = detectProtocol(p);
           const tag = enc(n.name);
+          
           if (protocol === 'hysteria2') return hysteria2ProfileToLink(p, fallbackName);
+          
+          const urlParams = new URLSearchParams(p.extraParams || {});
+          
+          if (p.outbound && p.outbound.mux) urlParams.set('mux', JSON.stringify(p.outbound.mux));
+          if (p.outbound && p.outbound.streamSettings && p.outbound.streamSettings.sockopt) urlParams.set('sockopt', JSON.stringify(p.outbound.streamSettings.sockopt));
+
           if (protocol === 'vless') {
             if (!n.id) throw new Error('missing UUID/password');
-            const q = []; addParam(q, 'type', n.network || 'tcp'); addParam(q, 'encryption', (n.method && n.method !== 'none' && n.method !== 'auto') ? n.method : 'none'); addParam(q, 'security', n.security || 'none'); if (n.headerType && n.headerType !== 'none') addParam(q, 'headerType', n.headerType); if (n.flow) addParam(q, 'flow', n.flow); if (n.sni) addParam(q, 'sni', n.sni); if (n.fp) addParam(q, 'fp', n.fp); if (n.publicKey) addParam(q, 'pbk', n.publicKey); if (n.shortId) addParam(q, 'sid', n.shortId); if (n.spiderX) addParam(q, 'spx', n.spiderX); if (n.alpn) addParam(q, 'alpn', n.alpn); if (n.hostHeader && (n.network === 'ws' || n.network === 'httpupgrade' || n.network === 'splithttp')) addParam(q, 'host', n.hostHeader); if (n.path) addParam(q, 'path', n.path); if (n.serviceName || n.network === 'grpc') addParam(q, 'serviceName', n.serviceName); if (n.authority && n.network === 'grpc') addParam(q, 'authority', n.authority); if (n.insecure) addParam(q, 'allowInsecure', '1');
-            return `vless://${enc(n.id)}@${n.host}:${n.port}${q.length ? '?' + q.join('&') : ''}#${tag}`;
+            if (n.network) urlParams.set('type', n.network);
+            if (n.method && n.method !== 'none' && n.method !== 'auto') urlParams.set('encryption', n.method);
+            if (n.security && n.security !== 'none') urlParams.set('security', n.security);
+            if (n.headerType && n.headerType !== 'none') urlParams.set('headerType', n.headerType);
+            if (n.flow) urlParams.set('flow', n.flow);
+            if (n.sni) urlParams.set('sni', n.sni);
+            if (n.fp) urlParams.set('fp', n.fp);
+            if (n.publicKey) urlParams.set('pbk', n.publicKey);
+            if (n.shortId) urlParams.set('sid', n.shortId);
+            if (n.spiderX) urlParams.set('spx', n.spiderX);
+            if (n.alpn) urlParams.set('alpn', n.alpn);
+            if (n.hostHeader && (n.network === 'ws' || n.network === 'httpupgrade' || n.network === 'splithttp')) urlParams.set('host', n.hostHeader);
+            if (n.path) urlParams.set('path', n.path);
+            if (n.serviceName) urlParams.set('serviceName', n.serviceName);
+            if (n.authority && n.network === 'grpc') urlParams.set('authority', n.authority);
+            if (n.insecure) urlParams.set('allowInsecure', '1');
+            
+            const qs = urlParams.toString();
+            return `vless://${enc(n.id)}@${n.host}:${n.port}${qs ? '?' + qs : ''}#${tag}`;
           }
+          
           if (protocol === 'vmess') {
             if (!n.id) throw new Error('missing UUID/password');
             const obj = { v: '2', ps: n.name, add: n.host, port: String(n.port), id: n.id, aid: String(n.alterId || '0'), scy: n.method && n.method !== 'none' ? n.method : 'auto', net: n.network || 'tcp', type: n.headerType || 'none', host: n.hostHeader || '', path: n.path || n.serviceName || '', tls: n.security && n.security !== 'none' ? n.security : '', sni: n.sni || '', fp: n.fp || '', alpn: n.alpn || '' };
+            for (const [k, v] of Object.entries(p.extraParams || {})) {
+               obj[k] = v;
+            }
+            if (p.outbound && p.outbound.mux) obj.mux = p.outbound.mux;
+            if (p.outbound && p.outbound.streamSettings && p.outbound.streamSettings.sockopt) obj.sockopt = p.outbound.streamSettings.sockopt;
             return `vmess://${base64Utf8(JSON.stringify(obj))}`;
           }
+          
           if (protocol === 'trojan') {
             if (!n.id) throw new Error('missing password');
-            const q = []; addParam(q, 'type', n.network || 'tcp'); addParam(q, 'security', n.security && n.security !== 'none' ? n.security : 'tls'); if (n.sni) addParam(q, 'sni', n.sni); if (n.fp) addParam(q, 'fp', n.fp); if (n.hostHeader && (n.network === 'ws' || n.network === 'httpupgrade' || n.network === 'splithttp')) addParam(q, 'host', n.hostHeader); if (n.path) addParam(q, 'path', n.path); if (n.alpn) addParam(q, 'alpn', n.alpn); if (n.authority && n.network === 'grpc') addParam(q, 'authority', n.authority); if (n.insecure) addParam(q, 'allowInsecure', '1');
-            return `trojan://${enc(n.id)}@${n.host}:${n.port}${q.length ? '?' + q.join('&') : ''}#${tag}`;
+            if (n.network) urlParams.set('type', n.network);
+            if (n.security && n.security !== 'none') urlParams.set('security', n.security);
+            if (n.sni) urlParams.set('sni', n.sni);
+            if (n.fp) urlParams.set('fp', n.fp);
+            if (n.hostHeader && (n.network === 'ws' || n.network === 'httpupgrade' || n.network === 'splithttp')) urlParams.set('host', n.hostHeader);
+            if (n.path) urlParams.set('path', n.path);
+            if (n.alpn) urlParams.set('alpn', n.alpn);
+            if (n.authority && n.network === 'grpc') urlParams.set('authority', n.authority);
+            if (n.insecure) urlParams.set('allowInsecure', '1');
+            
+            const qs = urlParams.toString();
+            return `trojan://${enc(n.id)}@${n.host}:${n.port}${qs ? '?' + qs : ''}#${tag}`;
           }
+          
           if (protocol === 'ss') {
             const method = n.method && n.method !== 'none' ? n.method : 'aes-128-gcm';
             if (!n.id) throw new Error('missing Shadowsocks password');
             const userInfo = base64Utf8(`${method}:${n.id}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
-            return `ss://${userInfo}@${n.host}:${n.port}#${tag}`;
+            const qs = urlParams.toString();
+            return `ss://${userInfo}@${n.host}:${n.port}${qs ? '?' + qs : ''}#${tag}`;
           }
-          if (protocol === 'socks') { const auth = n.username && n.password ? `${enc(n.username)}:${enc(n.password)}@` : ''; return `socks://${auth}${n.host}:${n.port}#${tag}`; }
+          
+          if (protocol === 'socks') { 
+            const auth = n.username && n.password ? `${enc(n.username)}:${enc(n.password)}@` : ''; 
+            return `socks://${auth}${n.host}:${n.port}#${tag}`; 
+          }
+          
           throw new Error('unknown protocol');
         }
         function convertJSONToLinks(obj, sourceName='') {
