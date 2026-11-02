@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- پس‌زمینه -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0a1a12"/>
+      <stop offset="100%" stop-color="#060d09"/>
+    </radialGradient>
+
+    <!-- گرادیان سبز نئونی -->
+    <linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6affa3"/>
+      <stop offset="100%" stop-color="#00cc66"/>
+    </linearGradient>
+
+    <!-- گرادیان آبی سیان (برای فلش تبدیل) -->
+    <linearGradient id="cyan" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00e5ff"/>
+      <stop offset="100%" stop-color="#0088ff"/>
+    </linearGradient>
+
+    <!-- افکت نور -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- ۱. پس‌زمینه اصلی -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- ۲. افکت تونل (شش‌ضلعی‌های محو) -->
+  <g stroke="#3bfe7a" stroke-width="2" opacity="0.1" fill="none">
+    <polygon points="256,40 420,120 420,392 256,472 92,392 92,120" />
+    <polygon points="256,80 380,144 380,368 256,432 132,368 132,144" />
+    <polygon points="256,120 340,168 340,344 256,392 172,344 172,168" />
+  </g>
+
+  <!-- ۳. حرف N با افکت نئون -->
+  <g filter="url(#glow)">
+    <!-- ستون چپ -->
+    <path d="M 150 130 L 210 130 L 210 382 L 150 382 Z" fill="url(#neon)"/>
+    <!-- ستون راست -->
+    <path d="M 302 130 L 362 130 L 362 382 L 302 382 Z" fill="url(#neon)"/>
+    <!-- خط مورب -->
+    <path d="M 210 130 L 302 382 L 242 382 L 150 130 Z" fill="url(#neon)"/>
+  </g>
+
+  <!-- ۴. فلش تبدیل (سیان) در مرکز -->
+  <g filter="url(#glow)">
+    <path d="M 230 230 L 280 230 L 280 210 L 310 250 L 280 290 L 280 270 L 230 270 Z" fill="url(#cyan)" opacity="0.9" />
+  </g>
+
+  <!-- ۵. نودهای تزئینی (اتصال شبکه) -->
+  <circle cx="150" cy="130" r="8" fill="#6affa3" filter="url(#glow)"/>
+  <circle cx="362" cy="382" r="8" fill="#6affa3" filter="url(#glow)"/>
+  <circle cx="362" cy="130" r="8" fill="#6affa3" filter="url(#glow)"/>
+  <circle cx="150" cy="382" r="8" fill="#6affa3" filter="url(#glow)"/>
+</svg>
